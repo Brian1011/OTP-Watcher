@@ -28,5 +28,7 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSUserNotificationUsageDescription</key>
+    <string>OTP Watcher needs to send OTP notifications</string>
 </dict>
 </plist>
