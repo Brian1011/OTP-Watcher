@@ -12,7 +12,10 @@ class NotificationService {
     );
   }
 
-  Future<void> sendNotification(String otp, String message) async {
+  Future<void> showOtpNotification({
+    required String otp,
+    required String message,
+  }) async {
     // show desktop notification
     final notification = LocalNotification(
       title: '🔐 New OTP Detected',
@@ -30,8 +33,10 @@ class NotificationService {
       await _player.play(AssetSource(soundPath));
     } catch (e) {
       debugPrint('Error playing alert: $e');
-    } finally {
-      await _player.dispose();
     }
+  }
+
+  Future<void> dispose() async {
+    await _player.dispose();
   }
 }
