@@ -4,6 +4,8 @@ A small desktop app that watches an SMS log file and surfaces one-time passwords
 
 It is aimed at local SMS gateway logs (for example an Africa's Talking SMS log) where verification codes land in a `.log` or `.txt` file instead of on a phone.
 
+This saves you from having to open the file and search for the code manually or wait for the SMS to arrive on your phone.
+
 ## How it works
 
 ![OTP Watcher](assets/images/otp_watcher_screenshot.png)
