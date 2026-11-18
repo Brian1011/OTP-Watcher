@@ -16,7 +16,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _filePathController = TextEditingController();
+  final List<TextEditingController> _pathControllers = [
+    TextEditingController(),
+  ];
   final _patternController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -27,7 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isWatching = false;
   String? _errorMessage;
 
-  static const _prefFilePath = 'pref_file_path';
+  static const _prefFilePath = 'pref_file_path'; // legacy single path
+  static const _prefFilePaths = 'pref_file_paths';
   static const _prefPattern = 'pref_pattern';
 
   @override
@@ -39,35 +42,68 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    // Fall back to the old single-path preference for existing users.
+    final saved =
+        prefs.getStringList(_prefFilePaths) ??
+        [
+          if ((prefs.getString(_prefFilePath) ?? '').isNotEmpty)
+            prefs.getString(_prefFilePath)!,
+        ];
     setState(() {
-      _filePathController.text = prefs.getString(_prefFilePath) ?? '';
+      for (final c in _pathControllers) {
+        c.dispose();
+      }
+      _pathControllers
+        ..clear()
+        ..addAll(
+          (saved.isEmpty ? [''] : saved).map((p) => TextEditingController(text: p)),
+        );
       _patternController.text = prefs.getString(_prefPattern) ?? 'Your OTP is';
     });
   }
 
+  List<String> get _paths => _pathControllers
+      .map((c) => c.text.trim())
+      .where((p) => p.isNotEmpty)
+      .toSet()
+      .toList();
+
   Future<void> _savePrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefFilePath, _filePathController.text.trim());
+    await prefs.setStringList(_prefFilePaths, _paths);
     await prefs.setString(_prefPattern, _patternController.text.trim());
   }
 
-  Future<void> _pickFile() async {
+  Future<void> _pickFile(TextEditingController controller) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['log', 'txt'],
       dialogTitle: 'Select SMS Log File',
     );
     if (result != null && result.files.single.path != null) {
-      setState(() => _filePathController.text = result.files.single.path!);
+      setState(() => controller.text = result.files.single.path!);
     }
   }
 
+  void _addPath() {
+    setState(() => _pathControllers.add(TextEditingController()));
+  }
+
+  void _removePath(int index) {
+    setState(() {
+      _pathControllers.removeAt(index).dispose();
+      if (_pathControllers.isEmpty) {
+        _pathControllers.add(TextEditingController());
+      }
+    });
+  }
+
   void _startWatching() {
-    final filePath = _filePathController.text.trim();
+    final filePaths = _paths;
     final pattern = _patternController.text.trim();
 
-    if (filePath.isEmpty) {
-      setState(() => _errorMessage = 'Please select a log file.');
+    if (filePaths.isEmpty) {
+      setState(() => _errorMessage = 'Please select at least one log file.');
       return;
     }
     if (pattern.isEmpty) {
@@ -83,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _savePrefs();
 
     _watcher.start(
-      filePath: filePath,
+      filePaths: filePaths,
       searchPattern: pattern,
       onOtpDetected: (entry) {
         setState(() => _entries.insert(0, entry));
@@ -95,10 +131,10 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       onError: (error) {
         debugPrint('Error: $error');
-        setState(() {
-          _errorMessage = error;
-          _isWatching = false;
-        });
+        setState(() => _errorMessage = error);
+      },
+      onStopped: () {
+        if (mounted) setState(() => _isWatching = false);
       },
     );
   }
@@ -132,7 +168,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _watcher.stop();
     _notifier.dispose();
-    _filePathController.dispose();
+    for (final c in _pathControllers) {
+      c.dispose();
+    }
     _patternController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -235,26 +273,54 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // File path row
-          _buildLabel('Log File'),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: _buildTextField(
-                  controller: _filePathController,
-                  hint: '/path/to/africas-talking-sms.log',
-                  enabled: !_isWatching,
-                ),
-              ),
-              const SizedBox(width: 8),
-              _buildIconButton(
-                icon: Icons.folder_open_rounded,
-                onTap: _isWatching ? null : _pickFile,
-                tooltip: 'Browse',
-              ),
-            ],
+          _buildLabel(
+            _pathControllers.length > 1 ? 'Log Files' : 'Log File',
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
+          for (var i = 0; i < _pathControllers.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _buildTextField(
+                      controller: _pathControllers[i],
+                      hint: '/path/to/africas-talking-sms.log',
+                      enabled: !_isWatching,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildIconButton(
+                    icon: Icons.folder_open_rounded,
+                    onTap: _isWatching
+                        ? null
+                        : () => _pickFile(_pathControllers[i]),
+                    tooltip: 'Browse',
+                  ),
+                  if (_pathControllers.length > 1) ...[
+                    const SizedBox(width: 8),
+                    _buildIconButton(
+                      icon: Icons.remove_circle_outline,
+                      onTap: _isWatching ? null : () => _removePath(i),
+                      tooltip: 'Remove',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _isWatching ? null : _addPath,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('Add another file'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF38BDF8),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
 
           // Pattern row
           _buildLabel('Search Pattern'),
@@ -560,7 +626,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '$dateStr · $timeStr',
+                  _pathControllers.length > 1
+                      ? '$dateStr · $timeStr · ${entry.sourcePath.split(RegExp(r'[/\\]')).last}'
+                      : '$dateStr · $timeStr',
                   style: const TextStyle(
                     color: Color(0xFF374151),
                     fontSize: 11,
